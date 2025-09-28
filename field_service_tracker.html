@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Field Service Hours Tracker</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Arial;max-width:1100px;margin:18px auto;padding:12px;color:#111}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between}
+  h1{font-size:1.25rem;margin:0}
+  nav{display:flex;gap:8px;align-items:center;margin-top:8px}
+  button, a.button{padding:8px 10px;border-radius:8px;border:1px solid #888;background:#f7f7f7;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}
+  .calendar{display:flex;gap:18px;margin-top:12px}
+  .month{flex:1;min-width:320px;border:1px solid #e3e3e3;border-radius:8px;padding:10px;background:#fff}
+  .side{width:360px;margin-left:18px}
+  .entries-list{max-height:400px;overflow:auto;border:1px solid #eee;padding:8px;border-radius:8px;background:#fff}
+  .muted{color:#666;font-size:0.9rem}
+  footer{margin-top:18px;color:#555;font-size:0.9rem}
+  @media(max-width:980px){.calendar{flex-direction:column}.side{width:100%;margin-left:0}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Field Service Hours Tracker</h1>
+    <div class="muted">Service year: <strong id="service-year-label"></strong> (Sept → Aug)</div>
+    <nav>
+      <a class="button" href="field_service_tracker.html">Calendar</a>
+      <a class="button" href="dashboard.html">Dashboard</a>
+    </nav>
+  </div>
+  <div>
+    <label>Default monthly goal: <input id="monthly-goal" type="number" min="0" step="1" style="width:80px"/></label>
+  </div>
+</header>
+
+<section class="calendar">
+  <div class="month" id="month-pane">
+    <h2><span id="month-title"></span> <small id="month-subtitle" class="muted"></small></h2>
+    <div id="calendar-grid" style="min-height:220px;padding:12px">Loading...</div>
+    <div style="margin-top:8px">
+      <button id="export-json">Export JSON</button>
+      <button id="export-csv">Export CSV</button>
+      <button id="import-json">Import JSON</button>
+      <input id="import-file" type="file" accept="application/json" style="display:none" />
+      <a class="button" id="install-instructions" href="#install">Install help</a>
+    </div>
+  </div>
+
+  <aside class="side">
+    <div style="margin-bottom:10px">
+      <label>View month: <select id="view-month"></select></label>
+      <label>Year: <select id="view-year"></select></label>
+      <button id="goto-today">Today</button>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div class="muted">Service year total (actual hours only)</div>
+      <div style="font-size:1.6rem;font-weight:700"><span id="service-total">0</span> hrs</div>
+      <div class="muted">From <span id="sy-start"></span> to <span id="sy-end"></span></div>
+      <label>Service year: <select id="service-year-select"></select></label>
+    </div>
+
+    <h3>Entries for <span id="selected-date-label">—</span></h3>
+    <div class="entries-list" id="entries-list"></div>
+
+    <div style="margin-top:8px;display:grid;grid-template-columns:1fr 86px;gap:8px;align-items:center">
+      <input id="quick-hours" type="number" placeholder="hours" min="0" step="0.25"/>
+      <button id="add-quick">Add</button>
+      <input id="quick-note" placeholder="note (optional)"/>
+      <select id="quick-type"><option value="actual">Actual</option><option value="planned">Planned</option></select>
+    </div>
+  </aside>
+</section>
+
+<footer id="install" style="margin-top:16px">
+  <h3>Install on iPhone - Quick steps</h3>
+  <ol>
+    <li>Download the ZIP I gave you and unzip it in the Files app.</li>
+    <li>Open <code>field_service_tracker.html</code> by tapping it, then choose "Open in Safari" from the Share menu if needed.</li>
+    <li>In Safari tap the <strong>Share</strong> button (a square with an up arrow), then tap <strong>Add to Home Screen</strong>.</li>
+    <li>Name it and tap <strong>Add</strong>. Now it will appear like an app on your Home Screen.</li>
+  </ol>
+  <p class="muted">Note: For the Google Drive backup & full PWA features, hosting the files on a small website (GitHub Pages or Netlify) is the best option. I can guide you step-by-step if you want.</p>
+</footer>
+
+<script>
+// Minimal calendar + storage code (compatible with dashboard.html)
+const KEY = 'fs_tracker_data_v2';
+const DEFAULT_GOAL = 50;
+function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {entries:[],monthlyGoal:DEFAULT_GOAL,monthGoals:{}} }catch(e){ return {entries:[],monthlyGoal:DEFAULT_GOAL,monthGoals:{}} } }
+function save(s){ localStorage.setItem(KEY, JSON.stringify(s)); }
+let state = load();
+state.entries = state.entries || [];
+state.monthlyGoal = state.monthlyGoal || DEFAULT_GOAL;
+state.monthGoals = state.monthGoals || {};
+
+const monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const viewMonth = document.getElementById('view-month'), viewYear=document.getElementById('view-year'), grid=document.getElementById('calendar-grid');
+const entriesList=document.getElementById('entries-list'), selectedDateLabel=document.getElementById('selected-date-label');
+const monthTitle=document.getElementById('month-title'), monthTotal=document.getElementById('service-total');
+const monthlyGoalInput=document.getElementById('monthly-goal');
+const serviceYearSelect=document.getElementById('service-year-select'), syStart=document.getElementById('sy-start'), syEnd=document.getElementById('sy-end');
+let cur=new Date(); cur.setDate(1); let selectedDate=null;
+
+function populateControls(){
+  viewMonth.innerHTML=''; for(let i=0;i<12;i++){ const o=document.createElement('option'); o.value=i; o.textContent=monthNames[i]; viewMonth.appendChild(o); }
+  const y=(new Date()).getFullYear(); viewYear.innerHTML=''; for(let i=y-3;i<=y+3;i++){ const o=document.createElement('option'); o.value=i; o.textContent=i; viewYear.appendChild(o); }
+  serviceYearSelect.innerHTML=''; for(let i=y-6;i<=y+1;i++){ const o=document.createElement('option'); o.value=i; o.textContent=i+' → '+(i+1); serviceYearSelect.appendChild(o); }
+  viewMonth.value=cur.getMonth(); viewYear.value=cur.getFullYear();
+  serviceYearSelect.value = (new Date().getMonth()>=8)?new Date().getFullYear():new Date().getFullYear()-1;
+  monthlyGoalInput.value=state.monthlyGoal;
+}
+
+function format(d){ return d.toISOString().slice(0,10); }
+function entriesForDate(iso){ return state.entries.filter(e=>e.date===iso); }
+function sumHoursInRange(start,end, includePlanned=true){
+  const s=start.toISOString().slice(0,10), e=end.toISOString().slice(0,10); let total=0;
+  for(const ent of state.entries){ if(ent.date>=s && ent.date<=e){ if(!includePlanned && ent.type==='planned') continue; total+=Number(ent.hours)||0; } } return total;
+}
+function startAndEndForServiceYear(startYear){ return {start:new Date(startYear,8,1), end:new Date(startYear+1,7,31)}; }
+function getGoalForMonth(y,m){ const key=`${y}-${String(m+1).padStart(2,'0')}`; return state.monthGoals[key] != null ? Number(state.monthGoals[key]) : Number(state.monthlyGoal||DEFAULT_GOAL); }
+
+function renderCalendar(){
+  grid.innerHTML='';
+  const year=Number(viewYear.value), month=Number(viewMonth.value);
+  monthTitle.textContent=`${monthNames[month]} ${year}`;
+  // simple list of days
+  const days = new Date(year, month+1, 0).getDate();
+  let html=''; for(let d=1;d<=days;d++){ const iso=format(new Date(year,month,d)); const ents=entriesForDate(iso); html+=`<div style="padding:6px;border-bottom:1px solid #eee"><strong>${d}</strong> - <small>${iso}</small><div>${ents.map(e=>e.hours+'h ('+e.type+') '+(e.note?'- '+e.note:'' )).join('<br/>')||'—'}</div></div>`; }
+  grid.innerHTML = html;
+  // service year total (actual only)
+  const sy=Number(serviceYearSelect.value); const r=startAndEndForServiceYear(sy); syStart.textContent=r.start.toISOString().slice(0,10); syEnd.textContent=r.end.toISOString().slice(0,10);
+  const total = sumHoursInRange(r.start, r.end, false); document.getElementById('service-total').textContent = Number(total).toFixed(2);
+  // selected date default
+  if(!selectedDate) selectedDate=format(new Date());
+  renderEntriesFor(selectedDate);
+}
+
+function renderEntriesFor(iso){ selectedDateLabel.textContent=iso; entriesList.innerHTML=''; const ents=entriesForDate(iso); if(!ents.length) entriesList.innerHTML='<div class="muted" style="padding:12px">No entries for this date.</div>'; else{ for(const e of ents){ const div=document.createElement('div'); div.style.padding='8px;border-bottom="1px solid #eee"'; div.innerHTML=`<div><strong>${e.hours} hrs</strong> <small class="muted">(${e.type})</small></div><div class="muted">${e.note||''}</div><div><button data-id="${e.id}" class="delbtn">Delete</button></div>`; entriesList.appendChild(div); } } }
+
+document.getElementById('add-quick').addEventListener('click', ()=>{
+  const h=Number(document.getElementById('quick-hours').value)||0;
+  const note=document.getElementById('quick-note').value||'';
+  const type=document.getElementById('quick-type').value||'actual';
+  if(!selectedDate){ alert('Tap a date in the calendar first (tap a day)'); return; }
+  if(h<=0 && !confirm('Save zero hours?')) return;
+  const ent={ id: 'e'+Date.now()+'_'+Math.random().toString(36).slice(2,6), date:selectedDate, hours:h, note, type, createdAt: Date.now() };
+  state.entries.push(ent); save(state); renderCalendar();
+});
+
+// export/import
+document.getElementById('export-json').addEventListener('click', ()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='fs_tracker_export.json'; a.click(); URL.revokeObjectURL(url);
+});
+document.getElementById('export-csv').addEventListener('click', ()=>{
+  const rows=[['id','date','hours','type','note','createdAt']];
+  for(const e of state.entries) rows.push([e.id,e.date,e.hours,e.type,`"${(e.note||'').replace(/"/g,'""')}"`,e.createdAt]);
+  const csv=rows.map(r=>r.join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='fs_tracker_export.csv'; a.click(); URL.revokeObjectURL(url);
+});
+document.getElementById('import-json').addEventListener('click', ()=> document.getElementById('import-file').click());
+document.getElementById('import-file').addEventListener('change', async (ev)=>{
+  const f=ev.target.files[0]; if(!f) return; const text=await f.text(); const parsed=JSON.parse(text); state.entries = state.entries.concat(parsed.entries||[]); if(parsed.monthlyGoal) state.monthlyGoal=parsed.monthlyGoal; if(parsed.monthGoals) state.monthGoals=Object.assign({}, state.monthGoals||{}, parsed.monthGoals); save(state); alert('Imported and merged.'); renderCalendar();
+});
+
+// controls
+document.getElementById('goto-today').addEventListener('click', ()=>{ const t=new Date(); viewMonth.value=t.getMonth(); viewYear.value=t.getFullYear(); cur=new Date(t.getFullYear(),t.getMonth(),1); renderCalendar(); });
+viewMonth.addEventListener('change', ()=> renderCalendar()); viewYear.addEventListener('change', ()=> renderCalendar()); serviceYearSelect.addEventListener('change', ()=> renderCalendar());
+monthlyGoalInput.addEventListener('change', ()=>{ state.monthlyGoal = Number(monthlyGoalInput.value)||DEFAULT_GOAL; save(state); renderCalendar(); });
+
+// init
+function init(){ populateControls(); selectedDate=format(new Date()); renderCalendar(); }
+init();
+</script>
+</body>
+</html>

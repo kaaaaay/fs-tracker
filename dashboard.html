@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FS Tracker — Dashboard</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Arial;max-width:900px;margin:18px auto;padding:12px;color:#111}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between}
+  h1{font-size:1.1rem;margin:0}
+  nav{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .card{border:1px solid #eee;padding:12px;border-radius:8px;background:#fff}
+  canvas{max-width:100%;height:320px}
+  footer{margin-top:18px;color:#555;font-size:0.9rem}
+  button{padding:8px 10px;border-radius:8px;border:1px solid #888;background:#f7f7f7;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Dashboard — Service Year Progress</h1>
+    <nav>
+      <a class="button" href="field_service_tracker.html">Calendar</a>
+      <a class="button" href="dashboard.html">Dashboard</a>
+    </nav>
+  </div>
+  <div>
+    <label>Service year: <select id="service-year-select"></select></label>
+    <button id="refresh">Refresh</button>
+  </div>
+</header>
+
+<section class="card">
+  <canvas id="chart" width="800" height="320"></canvas>
+</section>
+
+<footer>
+  Bars = actual hours for each month (Sept → Aug). The line shows the monthly goal for each month (custom per-month goals included).
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const KEY='fs_tracker_data_v2';
+function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {entries:[],monthlyGoal:50,monthGoals:{}} }catch(e){ return {entries:[],monthlyGoal:50,monthGoals:{}} } }
+const state = load();
+const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+// service year select
+const sySelect=document.getElementById('service-year-select');
+const y=(new Date()).getFullYear();
+for(let i=y-6;i<=y+1;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`${i} → ${i+1}`; sySelect.appendChild(o); }
+sySelect.value = (new Date().getMonth()>=8)?new Date().getFullYear():new Date().getFullYear()-1;
+
+function startAndEndForServiceYear(startYear){ return {start:new Date(startYear,8,1), end:new Date(startYear+1,7,31)}; }
+function sumHoursInRange(start,end, includePlanned=true){
+  const s=start.toISOString().slice(0,10), e=end.toISOString().slice(0,10); let total=0;
+  for(const ent of state.entries){ if(ent.date>=s && ent.date<=e){ if(!includePlanned && ent.type==='planned') continue; total += Number(ent.hours) || 0; } } return total;
+}
+function getGoalForMonth(y,m){ const key=`${y}-${String(m+1).padStart(2,'0')}`; if(state.monthGoals && state.monthGoals[key] != null) return Number(state.monthGoals[key]); return Number(state.monthlyGoal||50); }
+
+let chart=null;
+function buildChartForServiceYear(startYear){
+  // months Sept (8) .. Aug (7) of next year
+  const labels=[];
+  const actuals=[];
+  const goals=[];
+  for(let i=0;i<12;i++){
+    const monthIndex = (8 + i) % 12; // 8->Sept
+    const year = (monthIndex>=8) ? startYear : startYear+1;
+    labels.push(monthNames[monthIndex].slice(0,3));
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex+1, 0);
+    actuals.push(sumHoursInRange(start,end,false)); // actual only
+    goals.push(getGoalForMonth(year, monthIndex));
+  }
+  const ctx=document.getElementById('chart').getContext('2d');
+  if(chart) chart.destroy();
+  chart=new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Actual hours', data: actuals, backgroundColor: 'rgba(54,162,235,0.6)' },
+        { label: 'Monthly goal', data: goals, type: 'line', borderColor: 'rgba(220,53,69,0.9)', fill:false, tension:0.2 }
+      ]
+    },
+    options: {
+      responsive:true,
+      interaction:{mode:'index', intersect:false},
+      scales: { y: { beginAtZero:true } }
+    }
+  });
+}
+
+document.getElementById('refresh').addEventListener('click', ()=> buildChartForServiceYear(Number(sySelect.value)));
+
+// build initially
+buildChartForServiceYear(Number(sySelect.value));
+</script>
+</body>
+</html>

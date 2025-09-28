@@ -1,0 +1,12 @@
+{
+  "name": "Field Service Hours Tracker",
+  "short_name": "FS Tracker",
+  "start_url": "field_service_tracker.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2b9f6b",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
